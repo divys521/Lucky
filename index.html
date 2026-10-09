@@ -78,7 +78,7 @@ footer{background:#2d1a13;color:#fff;margin-top:40px;padding:45px 0}.footer-grid
  <div class="kpis"><div class="kpi"><span>Orders</span><b id="statOrders">0</b></div><div class="kpi"><span>Sales</span><b id="statSales">₹0</b></div><div class="kpi"><span>Customers</span><b id="statCustomers">0</b></div><div class="kpi"><span>Pending / In Progress</span><b id="statPending">0</b></div></div>
  <div class="section"><div class="section-head"><div><h2>Customers</h2></div><button class="btn btn-primary" onclick="openCreateCustomer()">+ Create Customer</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Name</th><th>Mobile</th><th>Email</th><th>Status</th><th>Actions</th></tr></thead><tbody id="customersTable"></tbody></table></div></div>
  <div class="section"><div class="section-head"><div><h2>Menu Management</h2></div></div><div class="table-wrap"><table><thead><tr><th>Item</th><th>Category</th><th>Price</th><th>Availability</th><th>Action</th></tr></thead><tbody id="menuAdminTable"></tbody></table></div></div>
- <div class="section"><div class="section-head"><div><h2>Orders</h2></div><button class="btn btn-light" onclick="loadAdmin()">Refresh</button></div><div class="table-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Update</th></tr></thead><tbody id="adminTable"></tbody></table></div></div>
+ <div class="section"><div class="section-head"><div><h2>Orders</h2></div><button class="btn btn-light" onclick="loadAdmin()">Refresh</button></div><div class="table-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Update</th><th>History</th></tr></thead><tbody id="adminTable"></tbody></table></div></div>
 </div>
 </section>
 
@@ -91,6 +91,7 @@ footer{background:#2d1a13;color:#fff;margin-top:40px;padding:45px 0}.footer-grid
 <div class="modal" id="customerModal"><div class="box"><div class="box-head"><h2>Create Customer</h2><button class="btn btn-light" onclick="closeModal('customerModal')">✕</button></div><input id="ccName" placeholder="Customer name"><input id="ccMobile" placeholder="Mobile"><input id="ccEmail" placeholder="Email"><textarea id="ccAddress" placeholder="Delivery address"></textarea><input id="ccPassword" type="password" placeholder="Temporary password (min 6 chars)"><button class="btn btn-primary" style="width:100%" onclick="createCustomer()">Create Customer</button><p id="ccMsg"></p></div></div>
 <div class="modal" id="cartModal"><div class="box"><div class="box-head"><h2>Your Cart</h2><button class="btn btn-light" onclick="closeModal('cartModal')">✕</button></div><div id="cartItems"></div><label>Delivery Address</label><textarea id="cartAddress"></textarea><label>Special Instructions</label><textarea id="instructions" placeholder="Less sugar, extra ice, no whipped cream..."></textarea><label>Payment</label><select id="payment"><option>Cash on Delivery</option><option>UPI / Online</option></select><div class="checkout-total"><b>Total</b><b>₹<span id="grand">0</span></b></div><button class="btn btn-primary" style="width:100%" onclick="checkout()">Place Order</button><p id="cartMsg"></p></div></div>
 <div class="modal" id="ordersModal"><div class="box wide"><div class="box-head"><h2>My Orders</h2><div><button class="btn btn-light" onclick="openOrders()">Refresh</button> <button class="btn btn-light" onclick="closeModal('ordersModal')">✕</button></div></div><div id="orders"></div></div></div>
+<div class="modal" id="orderDetailsModal"><div class="box wide"><div class="box-head"><h2 id="orderDetailsTitle">Order Details</h2><button class="btn btn-light" onclick="closeModal('orderDetailsModal')">✕</button></div><div id="orderDetailsContent"></div></div></div>
 <div class="modal" id="menuModal"><div class="box"><div class="box-head"><h2>Edit Menu Item</h2><button class="btn btn-light" onclick="closeModal('menuModal')">✕</button></div><input id="miId" type="hidden"><input id="miName" placeholder="Name"><input id="miCategory" placeholder="Category"><textarea id="miDescription" placeholder="Description"></textarea><input id="miPrice" type="number" placeholder="Price"><input id="miImage" placeholder="Image URL"><select id="miAvailability"><option>Available</option><option>Out of Stock</option><option>Inactive</option></select><button class="btn btn-primary" style="width:100%" onclick="saveMenuItem()">Save</button><p id="miMsg"></p></div></div>
 
 <script>
@@ -98,7 +99,7 @@ const SUPABASE_URL='https://wsqekqjnnynlhekdqsmj.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY='sb_publishable_osYlHilUpUSHwvDlN1b3sQ_KkVaQTyu';
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
 const statuses=['Order Placed','Confirmed','Preparing','Out for Delivery','Delivered','Cancelled','Out of Stock'];
-let menu=[],cart=[]; const $=id=>document.getElementById(id);
+let menu=[],cart=[],customerOrdersCache=[],adminOrdersCache=[]; const $=id=>document.getElementById(id);
 function closeModal(id){$(id).classList.remove('show')}
 function customer(){try{return JSON.parse(localStorage.getItem('lucky_customer')||'null')}catch{return null}}
 function openCustomerLogin(){ $('loginModal').classList.add('show') }
@@ -150,6 +151,33 @@ async function checkout(){
   await openOrders();
 }
 function timeline(status){const terminal=['Cancelled','Out of Stock'];const path=terminal.includes(status)?['Order Placed',status]:statuses.filter(s=>!terminal.includes(s));const idx=path.indexOf(status);return `<div class="timeline">${path.map((s,i)=>{const current=i===idx;const label=current?`<div class="small muted">Current status${terminal.includes(status)?' — order closed':''}</div>`:'';return `<div class="step ${i<idx?'done':''} ${current?'current':''}"><span class="dot"></span><div><b>${s}</b>${label}</div></div>`}).join('')}</div>`}
+function renderHistory(history,currentStatus){
+  const rows=Array.isArray(history)?history:[];
+  if(!rows.length)return '<p class="muted small">No status changes recorded yet. The current order status is shown above.</p>';
+  return '<div class="timeline">'+rows.map(h=>`<div class="step done"><span class="dot"></span><div><b>${h.new_status||'Status updated'}</b><div class="small muted">${h.changed_at?new Date(h.changed_at).toLocaleString():'Time not recorded'}</div>${h.previous_status?`<div class="small">Changed from ${h.previous_status}</div>`:''}${h.note?`<div class="small">Note: ${h.note}</div>`:''}</div></div>`).join('')+`<div class="step current"><span class="dot"></span><div><b>Current status: ${currentStatus||'Order Placed'}</b></div></div></div>`;
+}
+function renderOrderDetails(o,isAdmin){
+  const items=Array.isArray(o.items)?o.items:[];
+  $('orderDetailsTitle').textContent=(o.order_number||'Order')+' — Full History';
+  $('orderDetailsContent').innerHTML=`
+    <div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+      <div class="kpi"><span>Current Status</span><b style="font-size:18px">${o.status||'Order Placed'}</b></div>
+      <div class="kpi"><span>Order Date</span><b style="font-size:15px">${o.created_at?new Date(o.created_at).toLocaleString():'Not available'}</b></div>
+      <div class="kpi"><span>Items Subtotal</span><b>₹${o.subtotal??0}</b></div>
+      <div class="kpi"><span>Grand Total</span><b>₹${o.grand_total??0}</b></div>
+    </div>
+    ${isAdmin?`<p><b>Customer:</b> ${o.customer_name||''} (${o.customer_id||''}) · ${o.mobile||'No mobile recorded'}</p>`:''}
+    <p><b>Payment:</b> ${o.payment_status||'Not available'} &nbsp; <b>Delivery charge:</b> ₹${o.delivery_charge??0} &nbsp; <b>Discount:</b> ₹${o.discount??0}</p>
+    <p><b>Delivery address:</b><br>${o.delivery_address||'No address recorded'}</p>
+    <h3>Items</h3>
+    <div class="table-wrap"><table style="min-width:560px"><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Line total</th><th>Item status</th></tr></thead><tbody>${items.map(i=>`<tr><td>${i.item_name||'Item'}</td><td>${i.quantity??0}</td><td>₹${i.unit_price??0}</td><td>₹${i.total??0}</td><td>${i.item_status||'Not recorded'}${i.replacement_item?`<div class="small">Replacement: ${i.replacement_item}</div>`:''}</td></tr>`).join('')||'<tr><td colspan="5">Item details unavailable.</td></tr>'}</tbody></table></div>
+    <h3>Status history</h3>${renderHistory(o.status_history,o.status)}
+  `;
+  $('orderDetailsModal').classList.add('show');
+}
+function viewCustomerOrder(index){const o=customerOrdersCache[index];if(o)renderOrderDetails(o,false)}
+function viewAdminOrder(index){const o=adminOrdersCache[index];if(o)renderOrderDetails(o,true)}
+
 async function openOrders(){
   let c=customer();
   if(!c){openCustomerLogin();return}
@@ -165,20 +193,18 @@ async function openOrders(){
   let arr=data;
   if(typeof arr==='string'){try{arr=JSON.parse(arr)}catch(e){arr=[]}}
   if(!Array.isArray(arr)) arr=[];
-  $('orders').innerHTML=arr.length?arr.map(o=>`
+  customerOrdersCache=arr;
+  $('orders').innerHTML=arr.length?arr.map((o,index)=>`
     <div class="product" style="margin:12px 0">
       <div class="product-body">
         <div class="section-head">
-          <div>
-            <b>${o.order_number||'Order'}</b>
-            <div class="small muted">${o.created_at?new Date(o.created_at).toLocaleString():''}</div>
-          </div>
+          <div><b>${o.order_number||'Order'}</b><div class="small muted">${o.created_at?new Date(o.created_at).toLocaleString():''}</div></div>
           <span class="badge">${o.status||'Order Placed'}</span>
         </div>
         <p>${Array.isArray(o.items)?o.items.map(i=>`${i.item_name} × ${i.quantity} — ₹${i.total}`).join('<br>'):'Order items unavailable'}</p>
         <b>Grand Total: ₹${o.grand_total??0}</b>
-        ${timeline(o.status||'Order Placed')}
-        <div class="small">${o.delivery_address||''}</div>
+        <p class="small muted">Payment: ${o.payment_status||'Not available'} · Delivery: ₹${o.delivery_charge??0}</p>
+        <button class="btn btn-primary" onclick="viewCustomerOrder(${index})">View Full Order History</button>
       </div>
     </div>`).join(''):'<div style="text-align:center;padding:30px"><h3>No orders yet</h3><p class="muted">Once you place an order, it will appear here.</p></div>';
 }
@@ -197,7 +223,7 @@ async function loadMenuAdmin(){let {data}=await sb.from('menu_items').select('*'
 function editMenu(m){$('miId').value=m.id;$('miName').value=m.name;$('miCategory').value=m.category;$('miDescription').value=m.description||'';$('miPrice').value=m.price;$('miImage').value=m.image_url||'';$('miAvailability').value=m.availability;$('menuModal').classList.add('show')}
 async function saveMenuItem(){let {error}=await sb.rpc('admin_update_menu_item',{p_id:$('miId').value,p_name:$('miName').value,p_category:$('miCategory').value,p_description:$('miDescription').value,p_price:Number($('miPrice').value),p_image_url:$('miImage').value,p_availability:$('miAvailability').value});if(error)return $('miMsg').textContent=error.message;closeModal('menuModal');await loadMenu();await loadMenuAdmin()}
 function allowedStatuses(current){const flow={'Order Placed':['Confirmed','Cancelled','Out of Stock'],'Confirmed':['Preparing','Cancelled','Out of Stock'],'Preparing':['Out for Delivery','Cancelled','Out of Stock'],'Out for Delivery':['Delivered'],'Delivered':[],'Cancelled':[],'Out of Stock':[]};return [current,...(flow[current]||[])].filter((s,i,a)=>a.indexOf(s)===i)}
-async function loadOrders(){let {data,error}=await sb.rpc('admin_orders');if(error){$('adminTable').innerHTML=`<tr><td colspan="7">${error.message}</td></tr>`;return}let arr=data||[];$('adminTable').innerHTML=arr.map(o=>`<tr><td><b>${o.order_number}</b><br><span class="small">${new Date(o.created_at).toLocaleString()}</span></td><td>${o.customer_name}<br>${o.customer_id}<br>${o.mobile||''}</td><td>${(o.items||[]).map(i=>`${i.item_name} × ${i.quantity}<br><span class="small">${i.item_status}</span>`).join('<br>')}</td><td>₹${o.grand_total}</td><td>${o.payment_status}</td><td><span class="badge">${o.status}</span></td><td><select onchange="changeStatus('${o.order_group_id}',this.value)">${allowedStatuses(o.status).map(s=>`<option ${s===o.status?'selected':''}>${s}</option>`).join('')}</select></td></tr>`).join('')||'<tr><td colspan="7">No orders.</td></tr>'}
+async function loadOrders(){let {data,error}=await sb.rpc('admin_orders');if(error){$('adminTable').innerHTML=`<tr><td colspan="8">${error.message}</td></tr>`;return}let arr=data||[];if(typeof arr==='string'){try{arr=JSON.parse(arr)}catch(e){arr=[]}}adminOrdersCache=Array.isArray(arr)?arr:[];$('adminTable').innerHTML=adminOrdersCache.map((o,index)=>`<tr><td><b>${o.order_number}</b><br><span class="small">${new Date(o.created_at).toLocaleString()}</span></td><td>${o.customer_name}<br>${o.customer_id}<br>${o.mobile||''}</td><td>${(o.items||[]).map(i=>`${i.item_name} × ${i.quantity}<br><span class="small">${i.item_status||'Item status unavailable'}</span>`).join('<br>')}</td><td>₹${o.grand_total}</td><td>${o.payment_status||'Not available'}</td><td><span class="badge">${o.status}</span></td><td><select onchange="changeStatus('${o.order_group_id}',this.value)">${allowedStatuses(o.status).map(s=>`<option ${s===o.status?'selected':''}>${s}</option>`).join('')}</select></td><td><button class="btn btn-light" onclick="viewAdminOrder(${index})">Details / History</button></td></tr>`).join('')||'<tr><td colspan="8">No orders.</td></tr>'}
 async function changeStatus(group,status){let note=prompt('Optional status note:')||'';let {error}=await sb.rpc('admin_update_order_status',{p_order_group_id:group,p_status:status,p_note:note});if(error)alert(error.message);else loadAdmin()}
 async function loadAdmin(){let {data}=await sb.rpc('admin_dashboard_stats');if(data){$('statOrders').textContent=data.orders;$('statSales').textContent='₹'+Number(data.sales).toFixed(0);$('statCustomers').textContent=data.customers;$('statPending').textContent=data.pending}await loadCustomers();await loadMenuAdmin();await loadOrders()}
 loadMenu();updateBar();updateCart();
