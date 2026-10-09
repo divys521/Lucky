@@ -149,7 +149,7 @@ async function checkout(){
   alert(`Order ${data.order_number} placed successfully. Total ₹${data.grand_total}`);
   await openOrders();
 }
-function timeline(status){const terminal=['Cancelled','Out of Stock'];const path=terminal.includes(status)?['Order Placed',status]:statuses.filter(s=>!terminal.includes(s));const idx=path.indexOf(status);return `<div class="timeline">${path.map((s,i)=>`<div class="step ${i<idx?'done':''} ${i===idx?'current':''}"><span class="dot"></span><div><b>${s}</b>${i===idx?'<div class="small muted">Current status${terminal.includes(status)?' — order closed':''}</div>':''}</div></div>`).join('')}</div>`}
+function timeline(status){const terminal=['Cancelled','Out of Stock'];const path=terminal.includes(status)?['Order Placed',status]:statuses.filter(s=>!terminal.includes(s));const idx=path.indexOf(status);return `<div class="timeline">${path.map((s,i)=>{const current=i===idx;const label=current?`<div class="small muted">Current status${terminal.includes(status)?' — order closed':''}</div>`:'';return `<div class="step ${i<idx?'done':''} ${current?'current':''}"><span class="dot"></span><div><b>${s}</b>${label}</div></div>`}).join('')}</div>`}
 async function openOrders(){
   let c=customer();
   if(!c){openCustomerLogin();return}
